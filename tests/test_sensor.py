@@ -28,6 +28,8 @@ from custom_components.esb_smart_meter.sensor import (
     ExportThisMonthSensor,
     ExportThisWeekSensor,
     ExportTodaySensor,
+    UsageTotalSensor,
+    ExportTotalSensor,
     async_setup_entry,
 )
 from tests.conftest import _async_create_task_handler
@@ -90,15 +92,15 @@ class TestAsyncSetupEntry:
 
     @pytest.mark.asyncio
     async def test_setup_entry_creates_all_sensors(self, mock_hass, mock_config_entry):
-        """Test that setup_entry creates all 16 sensors (import, export, diagnostic)."""
+        """Test that setup_entry creates all 18 sensors (period, export, total, diagnostic)."""
         async_add_entities = MagicMock()
 
         await async_setup_entry(mock_hass, mock_config_entry, async_add_entities)
 
-        # Verify 16 sensors were created (12 data + 4 diagnostic)
+        # Verify 18 sensors were created (12 period + 2 total + 4 diagnostic)
         assert async_add_entities.called
         sensors = async_add_entities.call_args[0][0]
-        assert len(sensors) == 16
+        assert len(sensors) == 18
 
         # Verify sensor types
         assert isinstance(sensors[0], TodaySensor)
@@ -113,11 +115,14 @@ class TestAsyncSetupEntry:
         assert isinstance(sensors[9], ExportLast7DaysSensor)
         assert isinstance(sensors[10], ExportThisMonthSensor)
         assert isinstance(sensors[11], ExportLast30DaysSensor)
+        # Cumulative totals
+        assert isinstance(sensors[12], UsageTotalSensor)
+        assert isinstance(sensors[13], ExportTotalSensor)
         # Diagnostic sensors
-        assert isinstance(sensors[12], LastUpdateSensor)
-        assert isinstance(sensors[13], ApiStatusSensor)
-        assert isinstance(sensors[14], DataAgeSensor)
-        assert isinstance(sensors[15], CircuitBreakerStatusSensor)
+        assert isinstance(sensors[14], LastUpdateSensor)
+        assert isinstance(sensors[15], ApiStatusSensor)
+        assert isinstance(sensors[16], DataAgeSensor)
+        assert isinstance(sensors[17], CircuitBreakerStatusSensor)
 
 
 class TestBaseSensor:
@@ -182,6 +187,17 @@ class TestBaseSensor:
         assert export_sensor.native_value == 0.5
         assert import_sensor.native_value == 1.5
         assert export_sensor.unique_id == "12345678901_export_today"
+
+    def test_total_sensors_report_window_totals(self, mock_coordinator):
+        """Test cumulative total sensors report the retained-window kWh total."""
+        usage_total = UsageTotalSensor(coordinator=mock_coordinator, mprn="12345678901")
+        export_total = ExportTotalSensor(coordinator=mock_coordinator, mprn="12345678901")
+
+        assert usage_total.native_value == 1.5
+        assert export_total.native_value == 0.5
+        assert usage_total.unique_id == "12345678901_usage_total"
+        # State class unset so the recorder does not compile stats from state
+        assert usage_total.state_class is None
 
     @pytest.mark.parametrize(
         "sensor_cls, prop",
