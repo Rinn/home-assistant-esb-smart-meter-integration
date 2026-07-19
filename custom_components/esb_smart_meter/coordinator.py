@@ -13,6 +13,7 @@ from .api_client import ESBDataApi
 from .const import CAPTCHA_NOTIFICATION_ID, DEFAULT_SCAN_INTERVAL, DOMAIN, ESB_MYACCOUNT_URL
 from .models import ESBData
 from .session_manager import CaptchaRequiredException
+from .statistics import async_update_statistics
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -103,6 +104,12 @@ class ESBDataUpdateCoordinator(DataUpdateCoordinator[ESBData]):
 
             # Update the last successful update time
             self.last_successful_update_time = datetime.now(timezone.utc)
+
+            # Best-effort statistics backfill; don't fail the update over it
+            try:
+                await async_update_statistics(self.hass, self.mprn, esb_data)
+            except Exception as err:
+                _LOGGER.warning("Failed to update statistics for MPRN %s: %s", self.mprn, err)
 
             return esb_data
 

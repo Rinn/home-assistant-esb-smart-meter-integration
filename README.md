@@ -382,14 +382,21 @@ template:
 
 ### Energy Dashboard Integration
 
-Add ESB sensors to Home Assistant Energy Dashboard:
+The integration writes your readings into Home Assistant's long-term statistics
+(hourly, at their real timestamps), so the Energy Dashboard shows accurate history
+despite ESB's 1-2 day delay. Two statistics are created per meter:
+
+- **`ESB Electricity Usage`** — consumption
+- **`ESB Electricity Export`** — export to grid (solar)
 
 1. Go to **Settings** → **Dashboards** → **Energy**
-2. Click **Add Consumption**
-3. Select `sensor.esb_electricity_usage_today` or another sensor
+2. Click **Add Consumption** and select `ESB Electricity Usage`
+3. If you export to the grid, click **Add Return** and select `ESB Electricity Export`
 4. Configure tariff pricing if desired
 
-**Note**: For energy dashboard, `sensor.esb_electricity_usage_today` works best as it resets at midnight.
+**Note**: Use the statistics above (not the `sensor.esb_electricity_usage_*` entities)
+for the Energy Dashboard — they carry the correct historic timestamps. Data appears
+1-2 days after use because of ESB's publishing delay.
 
 ### Automation Examples
 
