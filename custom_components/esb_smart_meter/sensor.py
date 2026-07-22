@@ -466,11 +466,9 @@ class LastUpdateSensor(SensorEntity):
         self.async_write_ha_state()
 
     @property
-    def native_value(self) -> str | None:
+    def native_value(self) -> datetime | None:
         """Return the timestamp of the last successful update."""
-        if self.coordinator.last_successful_update_time is None:
-            return None
-        return self.coordinator.last_successful_update_time.isoformat()
+        return self.coordinator.last_successful_update_time
 
 
 class ApiStatusSensor(SensorEntity):
