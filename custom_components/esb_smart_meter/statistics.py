@@ -1,7 +1,7 @@
 """Long-term statistics import for ESB Smart Meter integration."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import homeassistant.util.dt as dt_util
 from homeassistant.components.recorder import get_instance
@@ -12,7 +12,7 @@ from homeassistant.components.recorder.models import (
 )
 from homeassistant.components.recorder.statistics import (
     async_import_statistics,
-    get_last_statistics,
+    statistics_during_period,
 )
 from homeassistant.core import HomeAssistant
 
@@ -27,46 +27,48 @@ async def async_import_hourly_statistics(
     statistic_id: str,
     hourly: list[tuple[datetime, float]],
 ) -> float | None:
-    """Import hourly (hour_start, kWh) buckets and return the cumulative total.
+    """Import the hourly buckets and return the cumulative total (None if empty).
 
-    Returns the running cumulative sum (the meter total), or None if there is no
-    data to work with.
+    Sums are anchored to the baseline recorded *before* the window, so the full
+    window can be reimported each run without the recorder's "now" row skewing it.
     """
     if not hourly:
         return None
 
-    last_start, running_sum = await _last_recorded(hass, statistic_id)
+    localized = [(h.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE), kwh) for h, kwh in hourly]
+    running_sum = await _baseline(hass, statistic_id, localized[0][0])
 
     stats: list[StatisticData] = []
-    for hour_start, kwh in hourly:
-        start = hour_start.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
-        if last_start is not None and start <= last_start:
-            continue  # already recorded
+    for start, kwh in localized:
         running_sum += kwh
         stats.append(StatisticData(start=start, state=kwh, sum=running_sum))
 
-    if stats:
-        metadata = StatisticMetaData(
-            mean_type=StatisticMeanType.NONE,
-            has_sum=True,
-            name=None,
-            source=RECORDER_SOURCE,
-            statistic_id=statistic_id,
-            unit_of_measurement="kWh",
-        )
-        async_import_statistics(hass, metadata, stats)
-        _LOGGER.debug("Imported %d statistics rows to %s", len(stats), statistic_id)
-
+    metadata = StatisticMetaData(
+        mean_type=StatisticMeanType.NONE,
+        has_sum=True,
+        name=None,
+        source=RECORDER_SOURCE,
+        statistic_id=statistic_id,
+        unit_of_measurement="kWh",
+    )
+    async_import_statistics(hass, metadata, stats)
+    _LOGGER.debug("Imported %d statistics rows to %s (total %.3f)", len(stats), statistic_id, running_sum)
     return running_sum
 
 
-async def _last_recorded(hass: HomeAssistant, statistic_id: str) -> tuple[datetime | None, float]:
-    """Return (start, sum) of the last recorded row, or (None, 0.0)."""
-    last = await get_instance(hass).async_add_executor_job(
-        get_last_statistics, hass, 1, statistic_id, True, {"sum"}
+async def _baseline(hass: HomeAssistant, statistic_id: str, window_start: datetime) -> float:
+    """Return the cumulative sum of the last statistic recorded before the window."""
+    rows = await get_instance(hass).async_add_executor_job(
+        statistics_during_period,
+        hass,
+        window_start - timedelta(days=366),
+        window_start,
+        {statistic_id},
+        "hour",
+        None,
+        {"sum"},
     )
-    rows = last.get(statistic_id)
-    if not rows:
-        return None, 0.0
-    row = rows[0]
-    return dt_util.utc_from_timestamp(row["start"]), float(row["sum"] or 0.0)
+    series = rows.get(statistic_id)
+    if series:
+        return float(series[-1].get("sum") or 0.0)
+    return 0.0

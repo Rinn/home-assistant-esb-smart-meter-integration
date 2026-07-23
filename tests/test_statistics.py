@@ -52,14 +52,13 @@ async def test_first_import_builds_cumulative_sum(hourly_usage):
 
 
 @pytest.mark.asyncio
-async def test_append_only_continues_from_prior_sum(hourly_usage):
-    """Test recorded hours are skipped and the cumulative sum continues."""
+async def test_baseline_offsets_cumulative_sum(hourly_usage):
+    """Test the cumulative continues from the baseline recorded before the window."""
     hass = MagicMock()
-    first_hour = hourly_usage[0][0]
-    prior_ts = first_hour.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE).timestamp()
 
-    async def fake_executor(func, hass_, count, statistic_id, convert, types):
-        return {statistic_id: [{"start": prior_ts, "sum": 10.0}]}
+    async def fake_executor(func, *args):
+        # statistics_during_period(...) -> last recorded row before the window
+        return {USAGE_ID: [{"sum": 10.0}]}
 
     with patch("custom_components.esb_smart_meter.statistics.get_instance") as get_instance, patch(
         "custom_components.esb_smart_meter.statistics.async_import_statistics"
@@ -67,10 +66,10 @@ async def test_append_only_continues_from_prior_sum(hourly_usage):
         get_instance.return_value.async_add_executor_job = AsyncMock(side_effect=fake_executor)
         await async_import_hourly_statistics(hass, USAGE_ID, hourly_usage)
 
+    # Full window is (re)imported, each hour offset by the baseline of 10.0
     _hass, _metadata, stats = add.call_args.args
-    assert len(stats) == 1
-    assert stats[0]["state"] == pytest.approx(0.4)
-    assert stats[0]["sum"] == pytest.approx(10.4)
+    assert [s["state"] for s in stats] == pytest.approx([0.3, 0.4])
+    assert [s["sum"] for s in stats] == pytest.approx([10.3, 10.7])
 
 
 @pytest.mark.asyncio
