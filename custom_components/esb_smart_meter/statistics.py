@@ -41,7 +41,7 @@ async def async_import_hourly_statistics(
     stats: list[StatisticData] = []
     for start, kwh in localized:
         running_sum += kwh
-        stats.append(StatisticData(start=start, state=kwh, sum=running_sum))
+        stats.append(StatisticData(start=start, state=running_sum, sum=running_sum))
 
     metadata = StatisticMetaData(
         mean_type=StatisticMeanType.NONE,

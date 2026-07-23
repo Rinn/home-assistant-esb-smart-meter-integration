@@ -47,8 +47,8 @@ async def test_first_import_builds_cumulative_sum(hourly_usage):
     _hass, metadata, stats = add.call_args.args
     assert metadata["statistic_id"] == USAGE_ID
     assert metadata["source"] == "recorder"
-    assert [s["state"] for s in stats] == pytest.approx([0.3, 0.4])
-    assert [s["sum"] for s in stats] == pytest.approx([0.3, 0.7])  # cumulative
+    assert [s["state"] for s in stats] == pytest.approx([0.3, 0.7])  # cumulative reading
+    assert [s["sum"] for s in stats] == pytest.approx([0.3, 0.7])
 
 
 @pytest.mark.asyncio
@@ -68,7 +68,7 @@ async def test_baseline_offsets_cumulative_sum(hourly_usage):
 
     # Full window is (re)imported, each hour offset by the baseline of 10.0
     _hass, _metadata, stats = add.call_args.args
-    assert [s["state"] for s in stats] == pytest.approx([0.3, 0.4])
+    assert [s["state"] for s in stats] == pytest.approx([10.3, 10.7])
     assert [s["sum"] for s in stats] == pytest.approx([10.3, 10.7])
 
 
@@ -83,7 +83,7 @@ async def test_statistics_written_to_recorder(recorder_mock, hass, hourly_usage)
         statistics_during_period, hass, start, None, {USAGE_ID}, "hour", None, {"state", "sum"}
     )
 
-    assert [row["state"] for row in stats[USAGE_ID]] == pytest.approx([0.3, 0.4])
+    assert [row["state"] for row in stats[USAGE_ID]] == pytest.approx([0.3, 0.7])
     assert [row["sum"] for row in stats[USAGE_ID]] == pytest.approx([0.3, 0.7])
 
 
