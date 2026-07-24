@@ -31,7 +31,7 @@ A comprehensive Home Assistant integration for monitoring your electricity usage
 ## ✨ Features
 
 - **📊 Twelve Time-Period Sensors**: Track usage and export for today, last 24 hours, this week, last 7 days, this month, and last 30 days
-- **📈 Two Total Sensors**: Backfills long-term statistics at their real timestamps, so past usage and export appears for time delayed data
+- **📈 Two History Sensors**: Backfill long-term statistics at their real timestamps, so past usage and export appears for time delayed data (with companion Total sensors showing the running cumulative total)
 - **🔄 Smart Caching**: Automatic data updates every 24 hours to minimize API calls and respect ESB's systems
 - **🔁 Robust Retry Logic**: 5 automatic retry attempts with 2-minute intervals on network failures
 - **⚡ Async Implementation**: Non-blocking async/await design using aiohttp for optimal Home Assistant performance
@@ -156,14 +156,16 @@ After successful setup, you'll have **fourteen energy sensors** created under a 
 | `sensor.esb_electricity_usage_last_7_days` | Rolling 7-day usage | Last 7 days |
 | `sensor.esb_electricity_usage_this_month` | Usage since 1st of this month | 1st 00:00 → now |
 | `sensor.esb_electricity_usage_last_30_days` | Rolling 30-day usage | Last 30 days |
-| `sensor.esb_electricity_usage_total` | Cumulative historical usage | All time |
+| `sensor.esb_electricity_usage_history` | Backfills usage into long-term statistics (Energy Dashboard source) | All time |
+| `sensor.esb_electricity_usage_total` | Cumulative historical usage (display) | All time |
 | `sensor.esb_electricity_export_today` | Export since midnight today | 00:00 today → now |
 | `sensor.esb_electricity_export_last_24_hours` | Rolling 24-hour export | Last 24 hours |
 | `sensor.esb_electricity_export_this_week` | Export since Monday this week | Monday 00:00 → now |
 | `sensor.esb_electricity_export_last_7_days` | Rolling 7-day export | Last 7 days |
 | `sensor.esb_electricity_export_this_month` | Export since 1st of this month | 1st 00:00 → now |
 | `sensor.esb_electricity_export_last_30_days` | Rolling 30-day export | Last 30 days |
-| `sensor.esb_electricity_export_total` | Cumulative historical export | All time |
+| `sensor.esb_electricity_export_history` | Backfills export into long-term statistics (Energy Dashboard source) | All time |
+| `sensor.esb_electricity_export_total` | Cumulative historical export (display) | All time |
 
 **All sensors report in kilowatt-hours (kWh)** with the `⚡` icon.
 
@@ -387,24 +389,28 @@ template:
 
 The integration imports your readings into Home Assistant's long-term statistics
 (hourly, at their real timestamps), so the Energy Dashboard shows accurate history
-despite ESB's 1-2 day delay. These are carried by two cumulative sensors grouped
+despite ESB's 1-2 day delay. These are carried by two **History** sensors grouped
 under the device:
 
-- **ESB Electricity Usage: Total** (`sensor.esb_electricity_usage_total`) — consumption
-- **ESB Electricity Export: Total** (`sensor.esb_electricity_export_total`) — export to grid
+- **ESB Electricity Usage: History** (`sensor.esb_electricity_usage_history`) — consumption
+- **ESB Electricity Export: History** (`sensor.esb_electricity_export_history`) — export to grid
 
 They appear under the **ESB Smart Meter** device in the statistic picker (shown by their name above).
 
 1. Go to **Settings** → **Dashboards** → **Energy** → **Edit Dashboard**
 2. Click **Add grid connection**
-3. Set **Energy imported from grid** to **ESB Electricity Usage: Total**
-4. If you export to the grid, set **Energy exported to grid** to **ESB Electricity Export: Total**
+3. Set **Energy imported from grid** to **ESB Electricity Usage: History**
+4. If you export to the grid, set **Energy exported to grid** to **ESB Electricity Export: History**
 5. Configure tariff pricing if desired
 
-**Note**: Use the `*_total` sensors above (not the period `sensor.esb_electricity_usage_*`
+**Note**: Use the `*_history` sensors above (not the period `sensor.esb_electricity_usage_*`
 entities) for the Energy Dashboard — they carry the correct historic timestamps, so
 scrolling back to past dates shows real usage. Data appears 1-2 days after use because
 of ESB's publishing delay.
+
+The companion **Total** sensors (`sensor.esb_electricity_usage_total`,
+`sensor.esb_electricity_export_total`) simply display the running cumulative total on
+the device page; they carry no statistics and are not used by the Energy Dashboard.
 
 ### Automation Examples
 

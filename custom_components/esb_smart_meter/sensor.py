@@ -5,12 +5,7 @@ from abc import abstractmethod
 from typing import Any
 from datetime import datetime, timezone
 
-from homeassistant.components.sensor import (
-    RestoreSensor,
-    SensorDeviceClass,
-    SensorEntity,
-    SensorStateClass,
-)
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant
@@ -36,6 +31,11 @@ async def async_setup_entry(
     coordinator: ESBDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     mprn = coordinator.mprn
 
+    # History sensors carry the long-term statistics; the Total sensors mirror
+    # their running total for display on the device page.
+    usage_history = UsageHistorySensor(coordinator=coordinator, mprn=mprn)
+    export_history = ExportHistorySensor(coordinator=coordinator, mprn=mprn)
+
     # Create all sensors using the coordinator
     sensors = [
         TodaySensor(coordinator=coordinator, mprn=mprn),
@@ -50,9 +50,11 @@ async def async_setup_entry(
         ExportLast7DaysSensor(coordinator=coordinator, mprn=mprn),
         ExportThisMonthSensor(coordinator=coordinator, mprn=mprn),
         ExportLast30DaysSensor(coordinator=coordinator, mprn=mprn),
-        # Cumulative totals (carry the long-term statistics grouped under the device)
-        UsageTotalSensor(coordinator=coordinator, mprn=mprn),
-        ExportTotalSensor(coordinator=coordinator, mprn=mprn),
+        # History (imported statistics) and their display totals
+        usage_history,
+        export_history,
+        UsageTotalSensor(coordinator=coordinator, mprn=mprn, history=usage_history),
+        ExportTotalSensor(coordinator=coordinator, mprn=mprn, history=export_history),
         # Diagnostic sensors
         LastUpdateSensor(coordinator=coordinator, mprn=mprn),
         ApiStatusSensor(coordinator=coordinator, mprn=mprn),
@@ -349,17 +351,16 @@ class ExportLast30DaysSensor(BaseSensor):
         return esb_data.get_export_readings_since(since=esb_data.since_30_days())
 
 
-class BaseTotalSensor(CoordinatorEntity[ESBDataUpdateCoordinator], RestoreSensor):
-    """Cumulative total that backfills its history into long-term statistics.
+class BaseHistorySensor(CoordinatorEntity[ESBDataUpdateCoordinator], SensorEntity):
+    """Backfills hourly history into long-term statistics.
 
-    Reports the running cumulative total as its state (TOTAL_INCREASING) and
-    imports hourly history against its own statistic id, so the statistics stay
-    grouped under the device.
+    Imports hourly history against its own statistic id so the statistics stay
+    grouped under the device. The entity is stateless (see native_value); the
+    paired Total sensor mirrors the running cumulative total for display.
     """
 
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_icon = "mdi:flash"
 
     def __init__(self, *, coordinator: ESBDataUpdateCoordinator, mprn: str, name: str) -> None:
@@ -368,6 +369,11 @@ class BaseTotalSensor(CoordinatorEntity[ESBDataUpdateCoordinator], RestoreSensor
         self._mprn = mprn
         self._attr_name = name
         self._cumulative: float | None = None
+        self._total_sensor: "BaseTotalSensor | None" = None
+
+    def register_total(self, total: "BaseTotalSensor") -> None:
+        """Link the display Total sensor so it can be refreshed after imports."""
+        self._total_sensor = total
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -384,15 +390,17 @@ class BaseTotalSensor(CoordinatorEntity[ESBDataUpdateCoordinator], RestoreSensor
         """Return the hourly (hour_start, kWh) buckets for this series."""
 
     @property
-    def native_value(self) -> float | None:
-        """Return the cumulative kWh total, or None until statistics have been imported."""
-        return self._cumulative
+    def native_value(self) -> None:
+        """Return no state; the data lives in the imported statistics.
+
+        A state_class would make the recorder auto-compile a second, conflicting
+        statistics series from the live state, so this stays stateless.
+        """
+        return None
 
     async def async_added_to_hass(self) -> None:
-        """Restore the last total, then import statistics once the id exists."""
+        """Import statistics once the entity (and its id) exists."""
         await super().async_added_to_hass()
-        if (last := await self.async_get_last_sensor_data()) is not None:
-            self._cumulative = last.native_value
         await self._async_import_statistics()
 
     def _handle_coordinator_update(self) -> None:
@@ -401,7 +409,7 @@ class BaseTotalSensor(CoordinatorEntity[ESBDataUpdateCoordinator], RestoreSensor
         super()._handle_coordinator_update()
 
     async def _async_import_statistics(self) -> None:
-        """Import hourly buckets and update the cumulative state."""
+        """Import hourly buckets and refresh the paired Total sensor."""
         if self.coordinator.data is None:
             return
         total = await async_import_hourly_statistics(
@@ -409,33 +417,108 @@ class BaseTotalSensor(CoordinatorEntity[ESBDataUpdateCoordinator], RestoreSensor
         )
         if total is not None:
             self._cumulative = total
-            self.async_write_ha_state()
+            if self._total_sensor is not None:
+                self._total_sensor.async_write_total()
 
 
-class UsageTotalSensor(BaseTotalSensor):
-    """Cumulative consumption total."""
+class UsageHistorySensor(BaseHistorySensor):
+    """Consumption history backfilled into long-term statistics."""
 
     def __init__(self, *, coordinator: ESBDataUpdateCoordinator, mprn: str) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator=coordinator, mprn=mprn, name="ESB Electricity Usage: Total")
-        self._attr_unique_id = f"{mprn}_usage_total"
+        super().__init__(coordinator=coordinator, mprn=mprn, name="ESB Electricity Usage: History")
+        self._attr_unique_id = f"{mprn}_usage_history"
 
     def _hourly(self, *, esb_data: ESBData) -> list[tuple[Any, float]]:
         """Get hourly usage buckets."""
         return esb_data.hourly_usage()
 
 
-class ExportTotalSensor(BaseTotalSensor):
-    """Cumulative grid export total."""
+class ExportHistorySensor(BaseHistorySensor):
+    """Grid export history backfilled into long-term statistics."""
 
     def __init__(self, *, coordinator: ESBDataUpdateCoordinator, mprn: str) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator=coordinator, mprn=mprn, name="ESB Electricity Export: Total")
-        self._attr_unique_id = f"{mprn}_export_total"
+        super().__init__(coordinator=coordinator, mprn=mprn, name="ESB Electricity Export: History")
+        self._attr_unique_id = f"{mprn}_export_history"
 
     def _hourly(self, *, esb_data: ESBData) -> list[tuple[Any, float]]:
         """Get hourly export buckets."""
         return esb_data.hourly_export()
+
+
+class BaseTotalSensor(CoordinatorEntity[ESBDataUpdateCoordinator], SensorEntity):
+    """Display-only cumulative total mirroring its paired History sensor.
+
+    Has no state_class, so the recorder never auto-compiles statistics for it;
+    the History sensor carries the long-term statistics. This entity just shows
+    the running total on the device page.
+    """
+
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_icon = "mdi:flash"
+
+    def __init__(
+        self,
+        *,
+        coordinator: ESBDataUpdateCoordinator,
+        mprn: str,
+        name: str,
+        history: BaseHistorySensor,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._mprn = mprn
+        self._attr_name = name
+        self._history = history
+        history.register_total(self)
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information about this entity."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._mprn)},
+            name=f"ESB Smart Meter ({self._mprn})",
+            manufacturer=MANUFACTURER,
+            model=MODEL,
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the running cumulative total from the paired History sensor."""
+        return self._history._cumulative
+
+    def async_write_total(self) -> None:
+        """Write the latest total to the state machine (called by the History sensor)."""
+        if self.hass is not None:
+            self.async_write_ha_state()
+
+
+class UsageTotalSensor(BaseTotalSensor):
+    """Cumulative consumption total (display)."""
+
+    def __init__(
+        self, *, coordinator: ESBDataUpdateCoordinator, mprn: str, history: BaseHistorySensor
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(
+            coordinator=coordinator, mprn=mprn, name="ESB Electricity Usage: Total", history=history
+        )
+        self._attr_unique_id = f"{mprn}_usage_total"
+
+
+class ExportTotalSensor(BaseTotalSensor):
+    """Cumulative grid export total (display)."""
+
+    def __init__(
+        self, *, coordinator: ESBDataUpdateCoordinator, mprn: str, history: BaseHistorySensor
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(
+            coordinator=coordinator, mprn=mprn, name="ESB Electricity Export: Total", history=history
+        )
+        self._attr_unique_id = f"{mprn}_export_total"
 
 
 class LastUpdateSensor(SensorEntity):

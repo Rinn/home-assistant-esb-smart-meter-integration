@@ -14,7 +14,7 @@ from custom_components.esb_smart_meter.models import ESBData
 from custom_components.esb_smart_meter.statistics import async_import_hourly_statistics
 
 IMPORT = "Active Import Interval (kWh)"
-USAGE_ID = "sensor.esb_electricity_usage_total"
+USAGE_ID = "sensor.esb_electricity_usage_history"
 
 
 def _row(dt, value, read_type):
